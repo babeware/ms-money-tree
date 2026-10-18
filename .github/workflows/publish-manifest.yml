@@ -1,0 +1,34 @@
+name: Update release manifest
+on:
+  release:
+    types: [published]
+permissions:
+  contents: write
+jobs:
+  manifest:
+    if: ${{ !github.event.release.prerelease && !github.event.release.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Write manifest for published release
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          URL: ${{ github.event.release.html_url }}
+        run: |
+          python3 - <<'PYCODE'
+          import os,json,re
+          tag=os.environ['TAG']
+          if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+',tag):
+              raise SystemExit('Release tag must be vMAJOR.MINOR.PATCH')
+          with open('release_manifest.json','w') as f:
+              json.dump({'version':tag[1:],'download_url':os.environ['URL']},f,indent=2)
+              f.write('\n')
+          PYCODE
+      - name: Commit manifest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add release_manifest.json
+          git diff --cached --quiet || (git commit -m "Update release manifest" && git push)
