@@ -2,30 +2,38 @@ name: Update release manifest
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing published release tag (e.g. v0.9.9)
+        required: true
 permissions:
   contents: write
 jobs:
   manifest:
-    if: ${{ !github.event.release.prerelease && !github.event.release.draft }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
           ref: main
-      - name: Write manifest for published release
+      - name: Build verified installer manifest
         env:
-          TAG: ${{ github.event.release.tag_name }}
-          URL: ${{ github.event.release.html_url }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
-          python3 - <<'PYCODE'
-          import os,json,re
-          tag=os.environ['TAG']
-          if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+',tag):
-              raise SystemExit('Release tag must be vMAJOR.MINOR.PATCH')
-          with open('release_manifest.json','w') as f:
-              json.dump({'version':tag[1:],'download_url':os.environ['URL']},f,indent=2)
-              f.write('\n')
-          PYCODE
+          python3 - <<'PY'
+          import os,re,subprocess,hashlib,json
+          tag=os.environ['TAG']; repo=os.environ['REPO']
+          if not re.fullmatch(r'v\d+\.\d+\.\d+',tag): raise SystemExit('Invalid tag')
+          name=f'MS_MONEY_TREE_Setup_{tag}_CONSUMER_DARK.exe'
+          # Require the asset to exist before publishing a usable manifest.
+          subprocess.run(['gh','release','download',tag,'--repo',repo,'--pattern',name,'--dir','/tmp'],check=True)
+          with open('/tmp/'+name,'rb') as f:
+            sha=hashlib.file_digest(f,'sha256').hexdigest()
+          manifest={'version':tag[1:],'installer_url':f'https://github.com/{repo}/releases/download/{tag}/{name}','sha256':sha}
+          with open('release_manifest.json','w') as f: json.dump(manifest,f,indent=2); f.write('\n')
+          PY
       - name: Commit manifest
         run: |
           git config user.name "github-actions[bot]"
